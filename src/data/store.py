@@ -151,7 +151,7 @@ def save_weekly_prices(df: pd.DataFrame) -> int:
     records = [
         (
             str(row["symbol"]),
-            row["date"],
+            row["week_start"],
             float(row["open"]),
             float(row["high"]),
             float(row["low"]),
@@ -183,10 +183,11 @@ def save_weekly_prices(df: pd.DataFrame) -> int:
             page_size=500
         )
 
-        inserted = cursor.rowcount
         conn.commit()
         cursor.close()
         conn.close()
+
+        inserted = len(records)
 
         log.info(f"Saved {inserted} rows to weekly_prices")
         return inserted
