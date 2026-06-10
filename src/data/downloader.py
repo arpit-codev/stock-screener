@@ -111,5 +111,11 @@ def download_daily_data(trading_date: date) -> pd.DataFrame | None:
     df = df.dropna(subset=["symbol", "date", "close", "volume"])
     df = df.reset_index(drop=True)
 
+    # Convert NumPy types to Python native types for psycopg2 compatibility
+    df["volume"] = df["volume"].astype(int)
+    df["delivery_qty"] = df["delivery_qty"].fillna(0).astype(int)
+    df["delivery_pct"] = df["delivery_pct"].astype(float)
+
     log.info(f"Clean data ready: {len(df)} stocks for {trading_date}")
+
     return df
