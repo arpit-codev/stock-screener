@@ -421,3 +421,98 @@ def date_exists(trading_date: date) -> bool:
     except Exception as e:
         log.error(f"Failed to check date existence: {e}")
         return False
+
+
+def save_yearly_open_levels(df: pd.DataFrame) -> int:
+    """Saves yearly open levels to DB."""
+    if df is None or df.empty:
+        return 0
+
+    records = [
+        (
+            str(row["symbol"]),
+            int(row["year"]),
+            float(row["yearly_open"]),
+            row["first_trade_date"],
+        )
+        for _, row in df.iterrows()
+    ]
+
+    sql = """
+        INSERT INTO yearly_open_levels (
+            symbol, year, yearly_open, first_trade_date
+        )
+        VALUES %s
+        ON CONFLICT (symbol, year) DO NOTHING
+    """
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        psycopg2.extras.execute_values(cursor, sql, records, page_size=500)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        inserted = len(records)
+        log.info(f"Saved {inserted} yearly open levels")
+        return inserted
+    except Exception as e:
+        log.error(f"Failed to save yearly open levels: {e}")
+        raise
+
+
+def save_yearly_open_tests(df: pd.DataFrame) -> int:
+    """Saves yearly open test events to DB."""
+    if df is None or df.empty:
+        return 0
+
+    records = [
+        (
+            str(row["symbol"]),
+            int(row["year"]),
+            float(row["yearly_open"]),
+            row["test_date"],
+            int(row["test_number"]),
+            str(row["test_type"]),
+            float(row["close_at_test"])      if pd.notna(row.get("close_at_test"))      else None,
+            float(row["low_at_test"])        if pd.notna(row.get("low_at_test"))        else None,
+            int(row["volume_at_test"])       if pd.notna(row.get("volume_at_test"))     else None,
+            float(row["delivery_at_test"])   if pd.notna(row.get("delivery_at_test"))   else None,
+            float(row["vol_ratio_at_test"])  if pd.notna(row.get("vol_ratio_at_test")) else None,
+            str(row["outcome"])              if pd.notna(row.get("outcome"))            else None,
+            float(row["return_1w"])          if pd.notna(row.get("return_1w"))          else None,
+            float(row["return_2w"])          if pd.notna(row.get("return_2w"))          else None,
+            float(row["return_4w"])          if pd.notna(row.get("return_4w"))          else None,
+            float(row["return_8w"])          if pd.notna(row.get("return_8w"))          else None,
+            float(row["max_gain_8w"])        if pd.notna(row.get("max_gain_8w"))        else None,
+            float(row["max_drawdown_8w"])    if pd.notna(row.get("max_drawdown_8w"))    else None,
+            bool(row["gave_10pct"])          if pd.notna(row.get("gave_10pct"))         else False,
+        )
+        for _, row in df.iterrows()
+    ]
+
+    sql = """
+        INSERT INTO yearly_open_tests (
+            symbol, year, yearly_open, test_date, test_number,
+            test_type, close_at_test, low_at_test, volume_at_test,
+            delivery_at_test, vol_ratio_at_test, outcome,
+            return_1w, return_2w, return_4w, return_8w,
+            max_gain_8w, max_drawdown_8w, gave_10pct
+        )
+        VALUES %s
+        ON CONFLICT DO NOTHING
+    """
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        psycopg2.extras.execute_values(cursor, sql, records, page_size=500)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        inserted = len(records)
+        log.info(f"Saved {inserted} yearly open tests")
+        return inserted
+    except Exception as e:
+        log.error(f"Failed to save yearly open tests: {e}")
+        raise

@@ -139,6 +139,70 @@ CREATE INDEX IF NOT EXISTS idx_weekly_symbol
 CREATE INDEX IF NOT EXISTS idx_weekly_date
     ON weekly_prices (week_start DESC);
 
+-- ================================================================
+-- TABLE 3 — yearly_open_levels
+-- ----------------------------------------------------------------
+-- Stores the yearly open price for every stock every year.
+-- One row per stock per year.
+-- ================================================================
+
+CREATE TABLE IF NOT EXISTS yearly_open_levels (
+    symbol          TEXT        NOT NULL,
+    year            SMALLINT    NOT NULL,
+    yearly_open     NUMERIC(12, 2) NOT NULL,
+    first_trade_date DATE       NOT NULL,
+    PRIMARY KEY (symbol, year)
+);
+
+CREATE INDEX IF NOT EXISTS idx_yearly_open_symbol
+    ON yearly_open_levels (symbol, year DESC);
+
+
+-- ================================================================
+-- TABLE 4 — yearly_open_tests
+-- ----------------------------------------------------------------
+-- Every instance where price tested a yearly open level.
+-- Records test type, delivery context, and 8-week outcome.
+-- ================================================================
+
+CREATE TABLE IF NOT EXISTS yearly_open_tests (
+    id                  SERIAL PRIMARY KEY,
+    symbol              TEXT            NOT NULL,
+    year                SMALLINT        NOT NULL,
+    yearly_open         NUMERIC(12, 2)  NOT NULL,
+    test_date           DATE            NOT NULL,
+    test_number         SMALLINT        NOT NULL,  -- 1st, 2nd, 3rd test
+
+    -- Test type
+    test_type           TEXT            NOT NULL,
+    -- 'intraday_touch' / 'close_below' / 'false_breakdown'
+
+    -- Price context at test
+    close_at_test       NUMERIC(12, 2),
+    low_at_test         NUMERIC(12, 2),
+    volume_at_test      BIGINT,
+    delivery_at_test    NUMERIC(6, 2),
+    vol_ratio_at_test   NUMERIC(6, 2),  -- vs 22D avg
+
+    -- Outcome (filled after 8 weeks)
+    outcome             TEXT,
+    -- 'strong_support' / 'weak_support' /
+    -- 'false_breakdown' / 'breakdown' / 'base_formation'
+
+    return_1w           NUMERIC(8, 2),
+    return_2w           NUMERIC(8, 2),
+    return_4w           NUMERIC(8, 2),
+    return_8w           NUMERIC(8, 2),
+    max_gain_8w         NUMERIC(8, 2),
+    max_drawdown_8w     NUMERIC(8, 2),
+    gave_10pct          BOOLEAN DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_yot_symbol
+    ON yearly_open_tests (symbol, test_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_yot_year
+    ON yearly_open_tests (year, test_date DESC);
 
 -- ================================================================
 -- VIEWS
