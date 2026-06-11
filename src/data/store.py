@@ -254,7 +254,65 @@ def load_daily_prices(
         log.error(f"Failed to load daily_prices for {symbol}: {e}")
         return pd.DataFrame()
 
+def load_weekly_prices(
+    symbol: str,
+    from_date: date = None,
+    to_date: date = None
+) -> pd.DataFrame:
+    """
+    Loads weekly candles for a single symbol.
 
+    Parameters
+    ----------
+    symbol : str
+        NSE trading symbol e.g. 'TCS'
+    from_date : date, optional
+        Start week. Defaults to all available.
+    to_date : date, optional
+        End week. Defaults to all available.
+
+    Returns
+    -------
+    pd.DataFrame
+        Weekly candles sorted oldest to newest.
+    """
+    if from_date and to_date:
+        sql = """
+            SELECT
+                symbol, week_start as date, open, high, low, close,
+                volume, delivery_qty, delivery_pct
+            FROM weekly_prices
+            WHERE symbol     = :symbol
+            AND   week_start >= :from_date
+            AND   week_start <= :to_date
+            ORDER BY week_start ASC
+        """
+        params = {
+            "symbol"    : symbol,
+            "from_date" : from_date,
+            "to_date"   : to_date,
+        }
+    else:
+        sql = """
+            SELECT
+                symbol, week_start as date, open, high, low, close,
+                volume, delivery_qty, delivery_pct
+            FROM weekly_prices
+            WHERE symbol = :symbol
+            ORDER BY week_start ASC
+        """
+        params = {"symbol": symbol}
+
+    try:
+        engine = get_engine()
+        df     = pd.read_sql(text(sql), engine, params=params)
+        log.info(f"Loaded {len(df)} weekly candles for {symbol}")
+        return df
+    except Exception as e:
+        log.error(f"Failed to load weekly prices for {symbol}: {e}")
+        return pd.DataFrame()
+
+    
 def load_all_symbols_for_date(trading_date: date) -> pd.DataFrame:
     """
     Loads all stocks for a single trading date.
