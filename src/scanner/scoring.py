@@ -37,7 +37,6 @@ VOLUME_WEIGHTS = {
     "scenario_structural_rise"      : 8,
     "scenario_delivery_confirm"     : 8,
     "scenario_delivery_accel"       : 5,
-    "scenario_absorption"           : 10,
     "scenario_delivery_progression" : 7,
     "scenario_volume_expansion"     : 5,
     "scenario_two_day_delivery_surge": 5,
@@ -193,14 +192,33 @@ def calculate_conviction_score(
     # ================================================================
     # VOLUME SCORE (max 35 pts)
     # ================================================================
+
     volume_raw = 0
     for scenario, weight in VOLUME_WEIGHTS.items():
         fired = bool(v.get(scenario, False))
-        pts   = weight if fired else 0
+        pts = weight if fired else 0
         volume_raw += pts
         component_scores[f"vol_{scenario}"] = pts
 
-    # Cap at max (ignore negative — handled in red flags)
+    # ── Absorption tier bonus ──────────────────────────────────
+    # Scored separately — tier S/A/B get different points
+    # Tier S = super absorption (5x+ vol + 65%+ delivery) → 20 pts
+    # Tier A = strong absorption (2x+ vol + 60%+ delivery) → 14 pts
+    # Tier B = moderate absorption                         → 8 pts
+    absorption_tier = v.get("absorption_tier")
+    if absorption_tier == "S":
+        absorption_pts = 20
+    elif absorption_tier == "A":
+        absorption_pts = 14
+    elif absorption_tier == "B":
+        absorption_pts = 8
+    else:
+        absorption_pts = 0
+
+    volume_raw += absorption_pts
+    component_scores["vol_absorption_tiered"] = absorption_pts
+
+    # Cap at max
     volume_score = max(0, min(volume_raw, VOLUME_MAX))
 
     # ================================================================

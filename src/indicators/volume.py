@@ -13,9 +13,10 @@
 #   7. Volume Expansion        — weekly volume > quarterly baseline
 #   8. Delivery Progression    — rising delivery on consecutive up days
 #   9. Absorption Event        — high volume + flat price + high delivery
+#                                checked over last 15 days
 #
-# Input:  DataFrame of daily prices for ONE symbol
-# Output: dict of computed values + scenario flags
+# Key fix: Uses MEDIAN not mean for volume baselines
+#          A single spike day should not inflate averages
 # ================================================================
 
 import pandas as pd
@@ -86,18 +87,19 @@ def calculate_volume_indicators(df: pd.DataFrame) -> dict:
     low_today   = float(today["low"])
     deliv_today = today.get("delivery_pct", np.nan)
 
-    # ── Volume averages (prior periods, excluding today) ───────
-    vol_5d   = history.tail(5)["volume"].mean()     # ~1 week
-    vol_22d  = history.tail(22)["volume"].mean()    # ~1 month
-    vol_65d  = history.tail(65)["volume"].mean()    # ~1 quarter
-    vol_180d = history.tail(180)["volume"].mean()   # ~6 months
+    # ── Volume averages — MEDIAN to avoid spike distortion ─────
+    # Single spike days (e.g. 41M vs normal 2M) inflate mean badly
+    # Median gives the true "typical" volume level
+    vol_5d   = history.tail(5)["volume"].median()
+    vol_22d  = history.tail(22)["volume"].median()
+    vol_65d  = history.tail(65)["volume"].median()
+    vol_180d = history.tail(180)["volume"].median()
 
     # Weekly volume sum (last 5 days including today)
     vol_week_sum = df.tail(5)["volume"].sum()
 
     # Average weekly volume over last 13 weeks
-    # Each week = 5 trading days → 13 weeks = 65 days
-    weekly_vol_13w_avg = vol_65d * 5   # avg weekly sum
+    weekly_vol_13w_avg = vol_65d * 5
 
     # ── Volume ratios ──────────────────────────────────────────
     day_vol_ratio   = round(vol_today / vol_5d,  2) if vol_5d  > 0 else 0
@@ -134,47 +136,43 @@ def calculate_volume_indicators(df: pd.DataFrame) -> dict:
     # ── Candle body ────────────────────────────────────────────
     today_body_pct = _candle_body_pct(today)
 
+    # ── Check if price near support ────────────────────────────
+    recent_low   = history.tail(22)["low"].min() \
+                   if len(history) >= 22 else low_today
+    near_support = bool(close_today <= recent_low * 1.05)
+
+    # ── Open close diff today ──────────────────────────────────
+    open_close_diff = abs(close_today - open_today) / open_today * 100 \
+                      if open_today > 0 else 999
+
     # ================================================================
     # SCENARIO 1 — Volume Awakening
-    # ----------------------------------------------------------------
-    # Stock was dormant for months — volume just woke up.
-    # Key: the dormancy check separates this from a stock
-    # that is always active and just had a normal big day.
     # ================================================================
     scenario_awakening = bool(
-        day_vol_ratio  >= 1.5 and          # today bigger than recent week
-        week_vol_ratio >= 1.2 and          # week already elevated vs month
+        day_vol_ratio  >= 1.5 and
+        week_vol_ratio >= 1.2 and
         vol_180d > 0   and
-        vol_22d <= vol_180d * 1.3          # was quiet for 6 months (dormancy)
+        vol_22d <= vol_180d * 1.3
     )
 
     # ================================================================
     # SCENARIO 2 — Structural Volume Rise
-    # ----------------------------------------------------------------
-    # Not just today — the entire recent period is more active.
-    # Multi-period confirmation = sustained institutional interest.
     # ================================================================
     scenario_structural_rise = bool(
-        week_vol_ratio  >= 1.3 and         # week > month
-        month_vol_ratio >= 1.1             # month > quarter
+        week_vol_ratio  >= 1.3 and
+        month_vol_ratio >= 1.1
     )
 
     # ================================================================
     # SCENARIO 3 — Volume Contraction
-    # ----------------------------------------------------------------
-    # Volume drying up = supply exhausted = base building.
-    # Most powerful when price is also flat during contraction.
     # ================================================================
     scenario_contraction = bool(
         is_contracting and
-        day_vol_ratio <= 1.2               # today also not spiking
+        day_vol_ratio <= 1.2
     )
 
     # ================================================================
     # SCENARIO 4 — Delivery Confirmation
-    # ----------------------------------------------------------------
-    # High volume + high delivery = real institutional buying.
-    # Low delivery on high volume = intraday operators, ignore.
     # ================================================================
     scenario_delivery_confirm = bool(
         day_vol_ratio >= 1.5 and
@@ -184,9 +182,6 @@ def calculate_volume_indicators(df: pd.DataFrame) -> dict:
 
     # ================================================================
     # SCENARIO 5 — Delivery Acceleration
-    # ----------------------------------------------------------------
-    # Delivery % has been rising over multiple days.
-    # Smart money quietly increasing position over time.
     # ================================================================
     scenario_delivery_accel = bool(
         deliv_accelerating and
@@ -195,51 +190,30 @@ def calculate_volume_indicators(df: pd.DataFrame) -> dict:
     )
 
     # ================================================================
-    # SCENARIO 6 — Volume Climax (Up Move — Too Late)
-    # ----------------------------------------------------------------
-    # Massive volume + large UP price move = move already happened.
-    # Note: DOWN climax (selling exhaustion) is actually bullish —
-    # we do NOT flag that as too late.
+    # SCENARIO 6 — Volume Climax
     # ================================================================
     scenario_climax = bool(
         day_vol_ratio  >= 3.0 and
-        price_chg_pct  >= 3.0 and          # significant UP move
-        close_today    > prev_close         # confirmed up direction
+        price_chg_pct  >= 3.0 and
+        close_today    > prev_close
     )
 
     # ================================================================
     # SCENARIO 7 — Volume Expansion
-    # ----------------------------------------------------------------
-    # This week's total volume has crossed above the 13-week
-    # average weekly volume.
-    # Refinement: at least 3 of last 5 days were above their
-    # own 22-day average — confirms breadth of the expansion.
     # ================================================================
-
-    # Count how many of last 5 days had above-average volume
-    last_5_days = df.tail(5)
+    last_5_days    = df.tail(5)
     above_avg_days = sum(
         1 for _, row in last_5_days.iterrows()
         if float(row["volume"]) > vol_22d
     )
 
     scenario_volume_expansion = bool(
-        vol_week_sum > weekly_vol_13w_avg and    # week sum > 13W avg week
-        above_avg_days >= 3                       # at least 3 of 5 days active
+        vol_week_sum > weekly_vol_13w_avg and
+        above_avg_days >= 3
     )
 
     # ================================================================
     # SCENARIO 8 — Delivery Progression
-    # ----------------------------------------------------------------
-    # Rising delivery % on consecutive green (up-close) days.
-    # Tight price range is mandatory — if price is running 3%+
-    # each day it's momentum, not accumulation.
-    #
-    # Conditions:
-    #   - Last 3 days all closed green (close > open)
-    #   - Each day's delivery % > previous day's delivery %
-    #   - Each day's delivery % > 45%
-    #   - Total 3-day price range < 3% (tight accumulation)
     # ================================================================
     scenario_delivery_progression = False
 
@@ -251,9 +225,8 @@ def calculate_volume_indicators(df: pd.DataFrame) -> dict:
         deliv_d2 = d2.get("delivery_pct", np.nan)
         deliv_d3 = d3.get("delivery_pct", np.nan)
 
-        # 3-day price range
-        three_day_high = last_3["high"].max()
-        three_day_low  = last_3["low"].min()
+        three_day_high      = last_3["high"].max()
+        three_day_low       = last_3["low"].min()
         three_day_range_pct = (
             (three_day_high - three_day_low) / three_day_low * 100
         ) if three_day_low > 0 else 999
@@ -284,42 +257,87 @@ def calculate_volume_indicators(df: pd.DataFrame) -> dict:
             all_green and
             delivery_rising and
             all_delivery_high and
-            three_day_range_pct < 3.0      # price tight — not chasing
+            three_day_range_pct < 3.0
         )
 
     # ================================================================
-    # SCENARIO 9 — Absorption Event
+    # SCENARIO 9 — Absorption Event (last 15 days)
     # ----------------------------------------------------------------
-    # High volume + price went nowhere + high delivery.
-    # Classic Wyckoff Phase B — smart money absorbing all supply.
+    # Check if ANY day in last 15 days was an absorption candle.
+    # High volume + flat price + high delivery = smart money
+    # absorbing all available supply at a key level.
     #
-    # The candle body check is critical:
-    #   Small body = fierce battle, buyers absorbed sellers
-    #   Large body = directional move, not absorption
-    #
-    # Conditions:
-    #   - Volume >= 1.5x monthly average (heavy supply present)
-    #   - Price close within 0.5% of open (went nowhere)
-    #   - Delivery % >= 55% (real buying, not intraday flipping)
-    #   - Candle body < 35% of total range (absorption candle shape)
-    #   - Occurs at or near a support level (price near recent lows)
+    # Uses median volume BEFORE the window as baseline
+    # so a spike day doesn't inflate its own comparison.
     # ================================================================
+    scenario_absorption = False
+    absorption_date = None
+    absorption_tier = None
+    absorption_vol_ratio = None
+    absorption_delivery_pct = None
 
-    # Check if price is near recent support (within 5% of 22-day low)
-    recent_low      = history.tail(22)["low"].min() if len(history) >= 22 else low_today
-    near_support    = bool(close_today <= recent_low * 1.05)
+    # Baseline = median of all data before the 15-day window
+    # This ensures spike days in window don't inflate baseline
+    vol_baseline = df.iloc[:-16]["volume"].median() \
+                   if len(df) > 16 else vol_22d
 
-    # Price barely moved (close within 0.5% of open)
-    open_close_diff = abs(close_today - open_today) / open_today * 100 \
-        if open_today > 0 else 999
+    check_window = df.tail(16)   # last 15 days + today
 
-    scenario_absorption = bool(
-        day_vol_ratio  >= 1.5 and           # heavy volume
-        open_close_diff <= 0.5 and          # price went nowhere
-        pd.notna(deliv_today) and
-        float(deliv_today) >= 55.0 and      # real buying
-        today_body_pct  <= 35.0             # small body candle
-    )
+    for _, abs_row in check_window.iterrows():
+        abs_vol   = float(abs_row["volume"])
+        abs_open  = float(abs_row["open"])
+        abs_close = float(abs_row["close"])
+        abs_high  = float(abs_row["high"])
+        abs_low   = float(abs_row["low"])
+        abs_deliv = abs_row.get("delivery_pct", np.nan)
+
+        abs_vol_ratio  = abs_vol / vol_baseline \
+                         if vol_baseline > 0 else 0
+        abs_open_close = abs(abs_close - abs_open) / abs_open * 100 \
+                         if abs_open > 0 else 999
+        abs_range      = abs_high - abs_low
+        abs_body       = abs(abs_close - abs_open)
+        abs_body_pct   = abs_body / abs_range * 100 \
+                         if abs_range > 0 else 0
+
+        # Tier S — SUPER absorption
+        # Massive unusual volume + very high delivery + flat price
+        # This is the strongest possible accumulation signal
+        tier_s = bool(
+            abs_vol_ratio >= 5.0 and  # 5x+ baseline volume
+            abs_open_close <= 1.0 and  # price barely moved
+            pd.notna(abs_deliv) and
+            float(abs_deliv) >= 65.0 and  # very high delivery
+            abs_body_pct <= 40.0  # small body
+        )
+
+        # Tier A — strong absorption
+        tier_a = bool(
+            abs_vol_ratio >= 2.0 and
+            abs_open_close <= 0.5 and
+            pd.notna(abs_deliv) and
+            float(abs_deliv) >= 60.0 and
+            abs_body_pct <= 35.0
+        )
+
+        # Tier B — moderate absorption
+        tier_b = bool(
+            abs_vol_ratio >= 1.5 and
+            abs_open_close <= 0.8 and
+            pd.notna(abs_deliv) and
+            float(abs_deliv) >= 55.0 and
+            abs_body_pct <= 40.0
+        )
+
+        if tier_s or tier_a or tier_b:
+            scenario_absorption = True
+            absorption_date = abs_row["date"]
+            absorption_tier = "S" if tier_s else \
+                "A" if tier_a else "B"
+            absorption_vol_ratio = round(abs_vol_ratio, 1)
+            absorption_delivery_pct = round(float(abs_deliv), 1) \
+                if pd.notna(abs_deliv) else None
+            break
 
     # ================================================================
     # RETURN ALL VALUES
@@ -363,5 +381,13 @@ def calculate_volume_indicators(df: pd.DataFrame) -> dict:
         "scenario_climax"               : scenario_climax,
         "scenario_volume_expansion"     : scenario_volume_expansion,
         "scenario_delivery_progression" : scenario_delivery_progression,
-        "scenario_absorption"           : scenario_absorption,
+        "scenario_absorption": scenario_absorption,
+        "absorption_date": str(absorption_date) \
+            if absorption_date else None,
+        "absorption_tier": absorption_tier \
+            if scenario_absorption else None,
+        "absorption_vol_ratio": absorption_vol_ratio \
+            if scenario_absorption else None,
+        "absorption_delivery_pct": absorption_delivery_pct \
+            if scenario_absorption else None,
     }
