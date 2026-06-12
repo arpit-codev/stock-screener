@@ -120,19 +120,42 @@ def calculate_price_indicators(df: pd.DataFrame) -> dict:
     # ── Higher lows detection ──────────────────────────────────
     # Check last 3 significant lows are ascending
     # Use rolling 5-day minimum to find local lows
-    if len(df) >= 20:
-        rolling_lows = df["low"].rolling(5).min()
-        # Sample at 5-day intervals to get distinct lows
-        sampled_lows = [
-            float(rolling_lows.iloc[-5]),
-            float(rolling_lows.iloc[-10]),
-            float(rolling_lows.iloc[-15]),
-            float(rolling_lows.iloc[-20]),
-        ]
-        # Check if ascending (most recent first → reverse)
-        higher_lows = (
-            sampled_lows[0] > sampled_lows[1] > sampled_lows[2]
-        )
+
+    if len(df) >= 60:
+        # Find actual swing lows over last 90 days
+        # A swing low = lower than surrounding 3 days on each side
+        swing_lows = []
+        lookback = min(90, len(df) - 6)
+        start_idx = len(df) - lookback
+
+        for idx in range(start_idx + 3, len(df) - 3):
+            window_low = float(df["low"].iloc[idx])
+            left_min = float(df["low"].iloc[idx - 3:idx].min())
+            right_min = float(df["low"].iloc[idx + 1:idx + 4].min())
+            if window_low < left_min and window_low < right_min:
+                swing_lows.append((idx, window_low))
+
+        # Find best ascending sequence among last 4 swing lows
+        # Not just last 3 — allows skipping one bad point
+        higher_lows = False
+        if len(swing_lows) >= 2:
+            # Check last 2 swing lows ascending
+            last2 = swing_lows[-2:]
+            if last2[-1][1] > last2[-2][1]:
+                higher_lows = True
+
+        if higher_lows and len(swing_lows) >= 3:
+            # Confirm with 3rd last as well
+            last3 = swing_lows[-3:]
+            if last3[-1][1] > last3[-2][1]:
+                higher_lows = True
+            else:
+                # Middle low broke sequence — check if overall trend up
+                # First and last should still be ascending
+                if last3[-1][1] > last3[-3][1]:
+                    higher_lows = True
+                else:
+                    higher_lows = False
     else:
         higher_lows = False
 
@@ -160,11 +183,14 @@ def calculate_price_indicators(df: pd.DataFrame) -> dict:
     # Buyers stepping in at higher prices = accumulation
     scenario_higher_lows = bool(higher_lows)
 
-    # SCENARIO 3 — Near 20 EMA (Pullback Zone)
-    # Price within 3% of 20 EMA
-    # Optimal R:R entry zone — not extended, not broken
+    # SCENARIO 3 — Price vs 20 EMA
+    # near_20ema = within ±3% of 20 EMA (pullback zone)
+    # above_20ema = price is above 20 EMA (uptrend intact)
     scenario_near_20ema = bool(
         abs(pct_from_ema20) <= 3.0
+    )
+    scenario_above_20ema = bool(
+        pct_from_ema20 > 0
     )
 
     # SCENARIO 4 — Below 200 EMA But Basing
@@ -239,6 +265,7 @@ def calculate_price_indicators(df: pd.DataFrame) -> dict:
         "scenario_consolidating"    : scenario_consolidating,
         "scenario_higher_lows"      : scenario_higher_lows,
         "scenario_near_20ema"       : scenario_near_20ema,
+        "scenario_above_20ema"      : scenario_above_20ema,
         "scenario_below_200ema"     : scenario_below_200ema,
         "scenario_near_52w_high"    : scenario_near_52w_high,
         "scenario_multi_year_base"  : scenario_multi_year_base,

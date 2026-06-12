@@ -41,6 +41,7 @@ VOLUME_WEIGHTS = {
     "scenario_volume_expansion"     : 5,
     "scenario_two_day_delivery_surge": 5,
     "scenario_contraction"          : 3,
+    "scenario_quiet_delivery"       : 6,
     # Negative — climax means move already happened
     "scenario_climax"               : -10,
 }
@@ -57,13 +58,14 @@ PRICE_WEIGHTS = {
     "scenario_consolidating"   : 8,
     "scenario_higher_lows"     : 7,
     "scenario_near_20ema"      : 6,
+    "scenario_above_20ema"     : 4,
     "scenario_near_52w_high"   : 4,
     "scenario_multi_year_base" : 8,
     # Negative — below 200 EMA reduces confidence slightly
     # but not a hard block (OBV divergence can overcome this)
     "scenario_below_200ema"    : -2,
 }
-PRICE_MAX = 25
+PRICE_MAX = 29
 
 # Bonus combos (rare powerful combinations)
 BONUS_COMBOS = [

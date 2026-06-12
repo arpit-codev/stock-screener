@@ -339,6 +339,20 @@ def calculate_volume_indicators(df: pd.DataFrame) -> dict:
                 if pd.notna(abs_deliv) else None
             break
 
+        # ================================================================
+        # SCENARIO 10 — Quiet Delivery
+        # ----------------------------------------------------------------
+        # Green day + high delivery = real buying without noise
+        # Institutions accumulating quietly
+        # ================================================================
+        prev_close = float(df.iloc[-2]["close"]) if len(df) >= 2 else close_today
+        scenario_quiet_delivery = bool(
+            close_today > prev_close and
+            pd.notna(deliv_today) and
+            float(deliv_today) >= 55.0 and
+            pd.notna(deliv_22d_avg) and
+            float(deliv_today) >= float(deliv_22d_avg)
+        )
     # ================================================================
     # RETURN ALL VALUES
     # ================================================================
@@ -390,4 +404,5 @@ def calculate_volume_indicators(df: pd.DataFrame) -> dict:
             if scenario_absorption else None,
         "absorption_delivery_pct": absorption_delivery_pct \
             if scenario_absorption else None,
+        "scenario_quiet_delivery": scenario_quiet_delivery,
     }

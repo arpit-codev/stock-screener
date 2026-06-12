@@ -441,6 +441,107 @@ def _score_scenarios(
     scores["s13_obv_higher_highs"] = 2 if s13 else 0
     flags["s13_obv_higher_highs"]  = s13
 
+    # ── S14 — Pullback Divergence ─────────────────────────────
+    # Price pulled back from recent high
+    # BUT OBV did not fall — smart money held positions
+    # Uptrend context checked via 4 conditions
+    s14 = False
+    pullback_detected = False
+    pullback_depth_pct = 0.0
+    obv_held = False
+    uptrend_conditions = {"A": False, "B": False,
+                          "C": False, "D": False}
+    uptrend_score = 0
+
+    if len(df_d) >= 20:
+        # Find recent high in last 20 days
+        recent_high_idx = df_d["close"].tail(20).idxmax()
+        recent_high_price = float(df_d.loc[recent_high_idx, "close"])
+        recent_high_obv = float(df_d.loc[recent_high_idx, "obv"])
+
+        pullback_depth = (recent_high_price - close_td) \
+                         / recent_high_price * 100
+        pullback_detected = pullback_depth >= 5.0
+
+        if pullback_detected:
+            pullback_depth_pct = round(pullback_depth, 2)
+
+            # Check if OBV held during pullback
+            obv_chg_during_pull = obv_today - recent_high_obv
+            obv_chg_norm = obv_chg_during_pull / avg_vol \
+                if avg_vol > 0 else 0
+            # OBV held = didn't fall more than 5x avg daily vol
+            obv_held = obv_chg_norm >= -5.0
+
+            # Uptrend context — check all 4 conditions
+            ema_20_val = float(
+                df_d["close"].ewm(span=20, adjust=False)
+                .mean().iloc[-1]
+            )
+            ema_50_val = float(
+                df_d["close"].ewm(span=50, adjust=False)
+                .mean().iloc[-1]
+            ) if len(df_d) >= 50 else None
+
+            avg_50d = float(df_d["close"].tail(50).mean()) \
+                if len(df_d) >= 50 else None
+
+            # Condition A — price above 20 EMA
+            uptrend_conditions["A"] = close_td > ema_20_val
+
+            # Condition B — price above 50 EMA
+            uptrend_conditions["B"] = bool(
+                ema_50_val and close_td > ema_50_val
+            )
+
+            # Condition C — made higher high in last 60 days
+            if len(df_d) >= 60:
+                high_30_60d = float(
+                    df_d["close"].iloc[-60:-30].max()
+                )
+                high_last_30d = float(
+                    df_d["close"].tail(30).max()
+                )
+                uptrend_conditions["C"] = \
+                    high_last_30d > high_30_60d
+            else:
+                uptrend_conditions["C"] = False
+
+            # Condition D — price above 50-day avg close
+            uptrend_conditions["D"] = bool(
+                avg_50d and close_td > avg_50d
+            )
+
+            uptrend_score = sum(
+                1 for v in uptrend_conditions.values() if v
+            )
+
+            # S14 fires if pullback detected + OBV held
+            # regardless of uptrend score
+            s14 = pullback_detected and obv_held
+
+    # Points based on uptrend score (more context = more pts)
+    s14_pts = 0
+    if s14:
+        if uptrend_score == 4:
+            s14_pts = 20  # all 4 uptrend conditions + OBV held
+        elif uptrend_score == 3:
+            s14_pts = 15  # strong uptrend + OBV held
+        elif uptrend_score == 2:
+            s14_pts = 10  # moderate uptrend
+        elif uptrend_score == 1:
+            s14_pts = 6  # weak uptrend context
+        else:
+            s14_pts = 3  # no uptrend but OBV held pullback
+
+    scores["s14_pullback_divergence"] = s14_pts
+    flags["s14_pullback_divergence"] = s14
+    flags["s14_pullback_depth_pct"] = pullback_depth_pct \
+        if pullback_detected else 0
+    flags["s14_obv_held"] = obv_held
+    flags["s14_uptrend_conditions"] = uptrend_conditions
+    flags["s14_uptrend_score"] = uptrend_score
+
     # ── Total score ────────────────────────────────────────────
     total_score = sum(scores.values())
     total_score = min(total_score, 100)   # cap at 100
@@ -458,7 +559,8 @@ def _score_scenarios(
     group_d = scores["s10_shakeout_detected"] + \
               scores["s11_weekly_divergence"] + \
               scores["s12_both_timeframes"] + \
-              scores["s13_obv_higher_highs"]
+              scores["s13_obv_higher_highs"] + \
+              scores["s14_pullback_divergence"]
 
     # ── Conviction tier ────────────────────────────────────────
     if total_score >= 70:
